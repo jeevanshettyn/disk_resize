@@ -1,4 +1,4 @@
-# Resize Oracle ASM Diskgroup using Elastic EBS Volumes.
+# Resize Oracle ASM Diskgroup online, using Elastic EBS Volumes.
 
 # Brief Description:
 Oracle Database is created on EC2 instance, with EBS volumes as storage. Oracle ASM is used to stripe the EBS volumes for better performance. AS EBS Volumes are elastic, ASM diskgroups can be resized dynamically whenever the it is short of space.
