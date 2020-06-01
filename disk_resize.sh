@@ -15,7 +15,7 @@
 ##     * Update Filesystem partition to reflect new disk size                                                                      ##
 ##     * Update Diskgroup to reflect new size                                                                                      ##
 ## > After DiskGroup resize, identify tablespaces that are below threshold.                                                        ##
-##     * For SmallFile Tablespace, add datafile of size 32 Gb                                                                      ##
+##     * For SmallFile Tablespace, add datafile of maxsize 32 Gb                                                                   ##
 ##     * For BigFile Tablespace, extend the MaxSize of the tablespace                                                              ##
 ##                                                                                                                                 ##
 ## SCRIPT HISTORY:                                                                                                                 ##
@@ -24,20 +24,20 @@
 #####################################################################################################################################
 
 SCRIPT=$0
-v_dg_used_percent=70
-v_dg_growth_percent=20
-v_tbs_used_percent=70
-v_tbs_growth_percent=20
+v_base_dir=`dirname $SCRIPT`
 
-v_loop_cnt=10
-v_sleep_cnt=2
-v_log='/tmp/disk_resize.log'
-v_dg_lst='/tmp/disk_list.log'
-v_asm_disk_loc='/dev/oracleasm/disks'
+
+if [[ -s ${v_base_dir}/param.lst ]]
+then
+    . ${v_base_dir}/param.lst
+else
+    v_subject="Error !!! - ${v_base_dir}/param.lst file does not exist in host = `hostname`"
+    # aws sns publish --subject "$v_subject" --message "$v_subject" --topic-arn $v_topic_arn
+    echo "`date` : Mail Sent !!! $v_subject"
+    exit 1
+fi
 
 echo "`date` : Script - $SCRIPT Started" >$v_log
-
-export DB_NAME="TCICT"
 export ORACLE_SID="+ASM"
 export ORAENV_ASK=NO
 export PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin:/root/bin
@@ -55,7 +55,7 @@ export LD_LIBRARY_PATH=/usr/lib64:$LD_LIBRARY_PATH
 echo "`date` : Identifying diskgroups that do not have enough space" >>$v_log
 sqlplus -s "/as sysasm" <<EOF1 >>$v_log 2>&1
 
-    set lines 200 pages 2000
+    set lines 200 pages 2000 feedback off
     col DISK_FILE_PATH format a40
 
     select a.name disk_group_name, b.name disk_file_name, b.path disk_file_path, b.label disk_name, a.TOTAL_MB, a.FREE_MB, round(a.free_mb/a.total_mb*100) percent_free
@@ -71,7 +71,7 @@ EOF1
 # Similar to above query but we identify the disk name which is saved to file $v_log. Also, it identifies the volume increment size for individual disks when the diskgroup size is above
 # v_dg_used_percent threshold
 #
-sqlplus -s "/as sysasm" <<EOF2 >$v_dg_lst
+sqlplus -s "/as sysasm" <<EOF2 >$v_alter_list
     set term off head off lines 120 pages 2000 feedback off
     col disk_group_name format a30
     col disk_name format a30
@@ -88,7 +88,7 @@ EOF2
 #
 # For every disk identified in above query, identify device name, EBS volume id and current disk size. These EBS volumes will be resized by increments defined in variable - v_vol_size_incr
 #
-cat $v_dg_lst | grep -v "no rows selected" | grep -v "^ *$" | while read v_disk_group_name v_disk_name v_vol_size_incr
+cat $v_alter_list | grep -v "no rows selected" | grep -v "^ *$" | while read v_disk_group_name v_disk_name v_vol_size_incr
 do
 
     #
@@ -113,7 +113,7 @@ do
 
     echo "`date` : Resizing Disk Group = $v_disk_group_name, Disk = $v_disk_name, Device Name = $v_device, Volume = $v_vol_id, Current Size = $v_vol_size, New Size = $v_new_vol_size" >>$v_log
     echo "`date` : aws ec2 modify-volume --region us-west-2 --volume-id $v_vol_id --size $v_new_vol_size" >>$v_log 2>&1
-    # aws ec2 modify-volume --region us-west-2 --volume-id $v_vol_id --size $v_new_vol_size >>$v_log 2>&1
+    aws ec2 modify-volume --region us-west-2 --volume-id $v_vol_id --size $v_new_vol_size >>$v_log 2>&1
 
     if [[ $? -ne 0 ]]
     then
@@ -189,7 +189,12 @@ export ORACLE_SID=$DB_NAME
 
 . /usr/local/bin/oraenv >/dev/null
 
-sqlplus -s "/as sysdba" <<EOF4 >$v_dg_lst 2>>$v_log
+echo "set echo on term on feedback on time on timin on" >$v_alter_list
+
+#
+# Now resize the tablespace which are below threshold - v_tbs_used_percent. Below query generates the alter tablespace statement
+#
+sqlplus -s "/as sysdba" <<EOF4 2>>$v_log | grep 'alter tablespace ' >>$v_alter_list
     set term off head off lines 120 pages 2000 feedback off
     col disk_name format a30
 
@@ -197,10 +202,10 @@ sqlplus -s "/as sysdba" <<EOF4 >$v_dg_lst 2>>$v_log
          (select case
                  when bigfile='YES' and round((bytes-free_bytes)/extensible_max_bytes,2)*100 > $v_tbs_used_percent
                  then
-                      'alter tablespace '||dt.tablespace_name||' autoextend on maxsize '||round((1+$v_tbs_growth_percent/100)*extensible_max_bytes/1024/1024)||'M;'
+                      'alter tablespace '||dt.tablespace_name||' autoextend on next 100M maxsize '||round((1+$v_tbs_growth_percent/100)*extensible_max_bytes/1024/1024)||'M;'
                  when bigfile!='YES' and 100 - round((extensible_free_bytes+free_bytes)/(smallfile_bytes+extensible_max_bytes),2)*100 > $v_tbs_used_percent
                  then
-                      'alter tablespace '||dt.tablespace_name||' add datafile size 32G autoextend off;'
+                      'alter tablespace '||dt.tablespace_name||' add datafile size 100M autoextend on next 100M maxsize 32767M;'
                  end sql_statement
             from dba_tablespaces dt,
                  (select tablespace_name, sum(bytes) bytes, sum(decode(maxbytes,0,bytes,0)) smallfile_bytes, sum(maxbytes) extensible_max_bytes,
@@ -213,19 +218,31 @@ sqlplus -s "/as sysdba" <<EOF4 >$v_dg_lst 2>>$v_log
     exit;
 EOF4
 
-cat $v_dg_lst | grep -v "no rows selected" | grep -v "^ *$" | while read v_sql_statement
-do
-    echo "`date` : $v_sql_statement" >>$v_log
-done
+echo "exit;" >>$v_alter_list
+
+#
+# Execute the alter tablespace statements generated above
+#
+sqlplus "/as sysdba" @$v_alter_list >>$v_log
+
+#cat $v_alter_list
 
 v_error_cnt=`grep -i error $v_log | grep -v grep | wc -l`
+v_change_count=`grep -E 'alter tablespace|modify-volume' $v_log | grep -v grep | wc -l`
 
-if [[ $v_error_cnt -gt 0 ]]
+if [[ "$v_error_cnt" -gt 0 ]]
+then
+    v_subject="Error !!! in space addition for host = `hostname`"
+elif [[ "$v_change_count" -gt 0 ]]
+then
+    v_subject="Space added for host = `hostname`"
+fi
+
+if [[ "$v_subject" != "" ]]
 then
     # Mail yet to be enabled in AWS EC2 instances
-
-    echo "`date` : Mail Sent !!!" >>$v_log
-
+    # aws sns publish --subject "$v_subject" --message file://$v_log --topic-arn $v_topic_arn
+    echo "`date` : Mail Sent !!! $v_subject" >>$v_log
 fi
 
 echo "`date` : Script - $SCRIPT Completed" >>$v_log
