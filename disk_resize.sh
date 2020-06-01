@@ -223,9 +223,11 @@ echo "exit;" >>$v_alter_list
 #
 # Execute the alter tablespace statements generated above
 #
-sqlplus "/as sysdba" @$v_alter_list >>$v_log
-
-#cat $v_alter_list
+v_change_count=`grep -i 'alter tablespace' $v_log | grep -v grep | wc -l`
+if [[ "$v_change_count" -gt 0 ]]
+then
+    sqlplus "/as sysdba" @$v_alter_list >>$v_log
+fi
 
 v_error_cnt=`grep -i error $v_log | grep -v grep | wc -l`
 v_change_count=`grep -E 'alter tablespace|modify-volume' $v_log | grep -v grep | wc -l`
