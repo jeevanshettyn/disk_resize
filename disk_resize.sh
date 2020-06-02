@@ -25,7 +25,7 @@
 
 SCRIPT=$0
 v_base_dir=`dirname $SCRIPT`
-
+v_region=`curl -s http://169.254.169.254/latest/meta-data/placement/availability-zone | rev | cut -c 2- | rev`
 
 if [[ -s ${v_base_dir}/param.lst ]]
 then
@@ -108,12 +108,12 @@ do
     # Identify main partition name of the device which will be used to reformat the device
     #
     v_device=`sudo nvme list | tr -s ' ' | grep $(echo "$v_vol_id" | sed 's/vol-/vol/') | cut -f 1 -d ' '`
-    v_vol_size=`aws ec2 describe-volumes --region us-west-2 --volume-id $v_vol_id --query "Volumes[0].{SIZE:Size}" 2>>$v_log | grep "SIZE" | tr -s ' ' | cut -f 3 -d ' '`
+    v_vol_size=`aws ec2 describe-volumes --region $v_region --volume-id $v_vol_id --query "Volumes[0].{SIZE:Size}" 2>>$v_log | grep "SIZE" | tr -s ' ' | cut -f 3 -d ' '`
     v_new_vol_size=`expr $v_vol_size + $v_vol_size_incr`
 
     echo "`date` : Resizing Disk Group = $v_disk_group_name, Disk = $v_disk_name, Device Name = $v_device, Volume = $v_vol_id, Current Size = $v_vol_size, New Size = $v_new_vol_size" >>$v_log
-    echo "`date` : aws ec2 modify-volume --region us-west-2 --volume-id $v_vol_id --size $v_new_vol_size" >>$v_log 2>&1
-    aws ec2 modify-volume --region us-west-2 --volume-id $v_vol_id --size $v_new_vol_size >>$v_log 2>&1
+    echo "`date` : aws ec2 modify-volume --region $v_region --volume-id $v_vol_id --size $v_new_vol_size" >>$v_log 2>&1
+    aws ec2 modify-volume --region $v_region --volume-id $v_vol_id --size $v_new_vol_size >>$v_log 2>&1
 
     if [[ $? -ne 0 ]]
     then
@@ -123,7 +123,7 @@ do
         #
         # Check the status of resize operation and wait till the modification is complete
         #
-        v_state=`aws ec2 describe-volumes-modifications --region us-west-2 --volume-id $v_vol_id  --query "VolumesModifications[0].{ModificationState:ModificationState}" 2>>$v_log | grep "State" | cut -f 4 -d '"'`
+        v_state=`aws ec2 describe-volumes-modifications --region $v_region --volume-id $v_vol_id  --query "VolumesModifications[0].{ModificationState:ModificationState}" 2>>$v_log | grep "State" | cut -f 4 -d '"'`
         echo "`date` : Volume Modification State = $v_state ..." >>$v_log
 
         v_cnt=$v_loop_cnt
@@ -133,7 +133,7 @@ do
             then
                 v_cnt=`expr $v_cnt - 1`
                 sleep $v_sleep_cnt
-                v_state=`aws ec2 describe-volumes-modifications --region us-west-2 --volume-id $v_vol_id  --query "VolumesModifications[0].{ModificationState:ModificationState}" 2>>$v_log | grep "State" | cut -f 4 -d '"'`
+                v_state=`aws ec2 describe-volumes-modifications --region $v_region --volume-id $v_vol_id  --query "VolumesModifications[0].{ModificationState:ModificationState}" 2>>$v_log | grep "State" | cut -f 4 -d '"'`
                 echo "`date` : Volume Modification State = $v_state ..." >>$v_log
             else
                 echo "`date` : ERROR Volume - $v_vol_id resize is taking more than $v_loop_cnt * $v_sleep_cnt seconds !!!" >>$v_log
@@ -223,10 +223,11 @@ echo "exit;" >>$v_alter_list
 #
 # Execute the alter tablespace statements generated above
 #
-v_change_count=`grep -i 'alter tablespace' $v_log | grep -v grep | wc -l`
+v_change_count=`grep -i 'alter tablespace' $v_alter_list | grep -v grep | wc -l`
 if [[ "$v_change_count" -gt 0 ]]
 then
-    sqlplus "/as sysdba" @$v_alter_list >>$v_log
+    echo "`date` : Resizing Tablespaces in Database - $ORACLE_SID" >>$v_log
+    sqlplus "/as sysdba" @$v_alter_list >>$v_log 2>&1
 fi
 
 v_error_cnt=`grep -i error $v_log | grep -v grep | wc -l`
