@@ -32,8 +32,6 @@ then
     . ${v_base_dir}/param.lst
 else
     v_subject="Error !!! - ${v_base_dir}/param.lst file does not exist in host = `hostname`"
-    # aws sns publish --subject "$v_subject" --message "$v_subject" --topic-arn $v_topic_arn
-    echo "`date` : Mail Sent !!! $v_subject"
     exit 1
 fi
 
@@ -243,8 +241,7 @@ fi
 
 if [[ "$v_subject" != "" ]]
 then
-    # Mail yet to be enabled in AWS EC2 instances
-    # aws sns publish --subject "$v_subject" --message file://$v_log --topic-arn $v_topic_arn
+    aws sns publish --subject "$v_subject" --message file://$v_log --topic-arn $v_topic_arn >/dev/null 2>>$v_log
     echo "`date` : Mail Sent !!! $v_subject" >>$v_log
 fi
 
@@ -253,5 +250,6 @@ echo "`date` : " >>$v_log
 echo "`date` : " >>$v_log
 
 cat $v_log
+
 
 
