@@ -25,13 +25,14 @@
 
 SCRIPT=$0
 v_base_dir=`dirname $SCRIPT`
+v_param_fl_name="${v_base_dir}/disk_resize_param.lst"
 v_region=`curl -s http://169.254.169.254/latest/meta-data/placement/availability-zone | rev | cut -c 2- | rev`
 
-if [[ -s ${v_base_dir}/param.lst ]]
+if [[ -s "$v_param_fl_name" ]]
 then
-    . ${v_base_dir}/param.lst
+    . $v_param_fl_name
 else
-    v_subject="Error !!! - ${v_base_dir}/param.lst file does not exist in host = `hostname`"
+    echo "`date` : Error !!! - $v_param_fl_name file does not exist in host = `hostname`"
     exit 1
 fi
 
@@ -109,7 +110,7 @@ do
     v_vol_size=`aws ec2 describe-volumes --region $v_region --volume-id $v_vol_id --query "Volumes[0].{SIZE:Size}" 2>>$v_log | grep "SIZE" | tr -s ' ' | cut -f 3 -d ' '`
     v_new_vol_size=`expr $v_vol_size + $v_vol_size_incr`
 
-    echo "`date` : Resizing Disk Group = $v_disk_group_name, Disk = $v_disk_name, Device Name = $v_device, Volume = $v_vol_id, Current Size = $v_vol_size, New Size = $v_new_vol_size" >>$v_log
+    echo "`date` : Resizing Disk Group = $v_disk_group_name, Disk = $v_disk_name, Device Name = $v_device, Volume = $v_vol_id, Current Size = $v_vol_size Gb, New Size = $v_new_vol_size Gb" >>$v_log
     echo "`date` : aws ec2 modify-volume --region $v_region --volume-id $v_vol_id --size $v_new_vol_size" >>$v_log 2>&1
     aws ec2 modify-volume --region $v_region --volume-id $v_vol_id --size $v_new_vol_size >>$v_log 2>&1
 

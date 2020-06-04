@@ -1,13 +1,14 @@
 
 export v_dg_used_percent=70
 export v_dg_growth_percent=30
-export v_tbs_used_percent=70
+export v_tbs_used_percent=80
 export v_tbs_growth_percent=20
 export v_loop_cnt=10
 export v_sleep_cnt=2
 export v_log='/tmp/disk_resize.log'
 export v_alter_list='/tmp/alter_list.log'
 export v_asm_disk_loc='/dev/oracleasm/disks'
-export v_topic_arn="arn:aws:sns:us-west-2:####:test-mail"
-export DB_NAME="tcpoc"
+export v_topic_arn="arn:aws:sns:us-west-2:####:Alerts_Oracle"
+export DB_NAME="TCPOC"
+
 
